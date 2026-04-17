@@ -1,0 +1,126 @@
+#!/bin/bash
+# video-analyze — Extract frames + transcript from a video for Claude Code analysis
+# Usage: video-analyze <path-to-video> [fps]
+#   fps: frames per second to extract (default: 0.5 = 1 frame every 2 seconds)
+
+set -euo pipefail
+
+if [ "${1:-}" = "--cleanup" ]; then
+  DIR="${2:-}"
+  if [ -d "$DIR" ] && [[ "$DIR" == /tmp/video-analyze-* ]]; then
+    rm -rf "$DIR"
+    echo "Cleaned up: $DIR"
+  else
+    echo "Nothing to clean: $DIR"
+  fi
+  exit 0
+fi
+
+if [ $# -lt 1 ]; then
+  echo "Usage: video-analyze <video-file> [fps]"
+  echo "       video-analyze --cleanup <output-dir>"
+  exit 1
+fi
+
+VIDEO="$1"
+FPS="${2:-0.5}"
+
+if [ ! -f "$VIDEO" ]; then
+  echo "Error: File not found: $VIDEO"
+  exit 1
+fi
+
+BASENAME=$(basename "$VIDEO" | sed 's/\.[^.]*$//' | tr -s '[:space:]' '_' | sed 's/[^A-Za-z0-9._-]/_/g')
+OUTDIR="/tmp/video-analyze-${BASENAME}"
+rm -rf "$OUTDIR"
+mkdir -p "$OUTDIR/frames"
+
+# Resolve whisper model path: env var > brew --prefix whisper-cpp > /opt/homebrew > /usr/local
+if [ -z "${WHISPER_MODEL:-}" ]; then
+  if command -v brew &>/dev/null; then
+    BREW_WHISPER_PREFIX=$(brew --prefix whisper-cpp 2>/dev/null || brew --prefix 2>/dev/null || echo "/opt/homebrew")
+  else
+    BREW_WHISPER_PREFIX="/opt/homebrew"
+  fi
+  WHISPER_MODEL="$BREW_WHISPER_PREFIX/share/whisper-cpp/ggml-small.bin"
+  [ -f "$WHISPER_MODEL" ] || WHISPER_MODEL="/usr/local/share/whisper-cpp/ggml-small.bin"
+fi
+
+echo "=== video-analyze ==="
+echo "Source:  $VIDEO"
+echo "Output:  $OUTDIR"
+echo ""
+
+DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$VIDEO" 2>/dev/null | cut -d. -f1)
+RESOLUTION=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$VIDEO" 2>/dev/null)
+echo "Duration:   ${DURATION}s"
+echo "Resolution: ${RESOLUTION}"
+
+echo "Extracting frames at ${FPS} fps..."
+ffmpeg -hide_banner -loglevel warning -i "$VIDEO" \
+  -vf "fps=${FPS}" \
+  -q:v 3 \
+  "$OUTDIR/frames/frame_%04d.jpg"
+
+FRAME_COUNT=$(ls "$OUTDIR/frames/" 2>/dev/null | wc -l | tr -d ' ')
+echo "Frames:     ${FRAME_COUNT}"
+
+TRANSCRIPT_STATUS="No audio track"
+HAS_AUDIO=$(ffprobe -v quiet -select_streams a -show_entries stream=codec_type -of csv=p=0 "$VIDEO" 2>/dev/null | head -1)
+
+if [ -n "$HAS_AUDIO" ]; then
+  echo "Extracting audio..."
+  ffmpeg -hide_banner -loglevel warning -i "$VIDEO" \
+    -vn -acodec pcm_s16le -ar 16000 -ac 1 \
+    "$OUTDIR/audio.wav" 2>/dev/null || true
+
+  if [ -f "$OUTDIR/audio.wav" ] && command -v whisper-cli &>/dev/null; then
+    if [ -f "$WHISPER_MODEL" ]; then
+      echo "Transcribing with whisper-cpp..."
+      whisper-cli \
+        -m "$WHISPER_MODEL" \
+        -f "$OUTDIR/audio.wav" \
+        --no-timestamps \
+        -otxt \
+        -of "$OUTDIR/transcript" \
+        2>/dev/null || true
+
+      if [ -f "$OUTDIR/transcript.txt" ] && [ -s "$OUTDIR/transcript.txt" ]; then
+        TRANSCRIPT_STATUS="Transcribed"
+        echo "Transcript:  $(wc -w < "$OUTDIR/transcript.txt" | tr -d ' ') words"
+      else
+        TRANSCRIPT_STATUS="Audio present but no speech detected"
+      fi
+    else
+      TRANSCRIPT_STATUS="Audio present (whisper model not found at $WHISPER_MODEL)"
+    fi
+  elif [ -f "$OUTDIR/audio.wav" ]; then
+    TRANSCRIPT_STATUS="Audio present (whisper-cli not found)"
+  fi
+
+  rm -f "$OUTDIR/audio.wav"
+fi
+
+cat > "$OUTDIR/summary.md" << SUMMARY
+# Video Analysis: $(basename "$VIDEO")
+
+- **Source**: $VIDEO
+- **Duration**: ${DURATION}s
+- **Resolution**: ${RESOLUTION}
+- **Frames**: ${FRAME_COUNT} extracted at ${FPS} fps
+- **Transcript**: ${TRANSCRIPT_STATUS}
+
+## Frames
+$(for f in "$OUTDIR/frames/"*.jpg; do echo "- $f"; done)
+
+## Transcript
+$(if [ -f "$OUTDIR/transcript.txt" ]; then cat "$OUTDIR/transcript.txt"; else echo "_No transcript available._"; fi)
+
+## Cleanup
+Run \`video-analyze --cleanup $OUTDIR\` when done.
+SUMMARY
+
+echo ""
+echo "Done!"
+echo ""
+echo "$OUTDIR/summary.md"
