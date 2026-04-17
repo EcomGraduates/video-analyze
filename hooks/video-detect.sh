@@ -54,15 +54,38 @@ def whisper_model_path() -> str:
     return os.path.join(prefix, "share", "whisper-cpp", "ggml-small.bin")
 
 
-def ensure_deps() -> None:
+BREW_INSTALL_CMD = (
+    '/bin/bash -c "$(curl -fsSL '
+    'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+)
+
+
+def ensure_deps() -> str | None:
+    """Install missing deps where possible. Returns a user-facing setup message
+    if manual action is required (e.g. Homebrew missing), otherwise None."""
     need = []
     if not which("ffmpeg"):
         need.append("ffmpeg")
     if not which("whisper-cli"):
         need.append("whisper-cpp")
+
+    if need and not which("brew"):
+        return (
+            "SETUP REQUIRED: The video-analyze plugin needs Homebrew to install its "
+            "dependencies (ffmpeg, whisper-cpp), but Homebrew was not found on this "
+            "Mac. This is a one-time setup. Tell the user to open Terminal and run:\n\n"
+            f"    {BREW_INSTALL_CMD}\n\n"
+            "That command will prompt for their Mac password (Homebrew needs sudo to "
+            "create /opt/homebrew). After Homebrew finishes installing, the next "
+            "video they share in Claude Code will auto-install ffmpeg + whisper-cpp "
+            "and the transcription model (~488MB, one-time). No manual steps after "
+            "that."
+        )
+
     if need and which("brew"):
         log(f"installing missing deps: {' '.join(need)}")
         subprocess.run(["brew", "install", *need], stderr=sys.stderr, stdout=sys.stderr)
+
     model = whisper_model_path()
     if which("whisper-cli") and not os.path.isfile(model):
         try:
@@ -77,6 +100,7 @@ def ensure_deps() -> None:
                 os.remove(model + ".tmp")
             except OSError:
                 pass
+    return None
 
 
 def find_urls(prompt: str) -> list[str]:
@@ -191,7 +215,17 @@ def main() -> None:
         print("{}")
         return
 
-    ensure_deps()
+    setup_msg = ensure_deps()
+    if setup_msg:
+        print(json.dumps({
+            "suppressOutput": True,
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": f"\n--- video-analyze plugin setup ---\n{setup_msg}\n---\n",
+            },
+            "systemMessage": "video-analyze: Homebrew not installed — see instructions in context",
+        }))
+        return
 
     instruction = (
         "INSTRUCTIONS FOR CLAUDE: The user shared a video. Use the Read tool on the "

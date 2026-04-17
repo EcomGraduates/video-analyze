@@ -15,18 +15,30 @@ Temp files land in `/tmp/video-analyze-*` and are cleaned up on `SessionEnd`.
 
 ## Install
 
+In Claude Code:
+
 ```
 /plugin marketplace add EcomGraduates/video-analyze
 /plugin install video-analyze@ecomgraduates
 ```
 
-Restart Claude Code. The first video you share triggers a one-time install of `ffmpeg`, `whisper-cpp`, and the `ggml-small.bin` Whisper model (~488 MB) via Homebrew.
+Restart Claude Code (or `/reload-plugins`). That's it. The first video you share auto-installs `ffmpeg` + `whisper-cpp` and downloads the Whisper model (~488 MB) — no further action needed.
+
+### First-run setup on a fresh Mac
+
+If you don't already have [Homebrew](https://brew.sh) installed, the plugin will tell you exactly what to paste — a single command:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Homebrew's installer needs your Mac password once (it has to create `/opt/homebrew`). After that, every remaining dependency installs automatically.
 
 ## Requirements
 
 - macOS (Apple Silicon or Intel)
-- [Homebrew](https://brew.sh) — used to install `ffmpeg` and `whisper-cpp` on first run
 - Python 3 (ships with macOS)
+- [Homebrew](https://brew.sh) — auto-installable; used to install `ffmpeg` + `whisper-cpp` on first video
 
 ## Usage
 

@@ -1,0 +1,40 @@
+{
+  "name": "video-analyze",
+  "description": "Auto-analyze video files and URLs mentioned in prompts. Extracts frames + transcribes audio so Claude can see and hear shared videos (screen recordings, clips, etc).",
+  "version": "0.1.0",
+  "author": {
+    "name": "EcomGraduates",
+    "url": "https://github.com/EcomGraduates"
+  },
+  "homepage": "https://github.com/EcomGraduates/video-analyze",
+  "repository": "https://github.com/EcomGraduates/video-analyze",
+  "license": "MIT",
+  "keywords": ["video", "screen-recording", "whisper", "ffmpeg", "hook"],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/video-detect.sh",
+            "timeout": 900,
+            "statusMessage": "Checking for video files..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/video-cleanup.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
