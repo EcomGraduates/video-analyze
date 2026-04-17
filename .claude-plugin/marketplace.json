@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "video-analyze",
-      "source": ".",
+      "source": "./",
       "description": "Auto-analyze video files and URLs mentioned in prompts. Extracts frames + transcribes audio so Claude can see and hear shared videos.",
       "version": "0.1.0"
     }
